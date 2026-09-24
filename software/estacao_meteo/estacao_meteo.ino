@@ -702,6 +702,7 @@ void webStart() {
 
 bool sdOk = false;
 uint32_t tLastSd = 0;
+SPIClass sdSPI(HSPI); // SPI3_HOST dedicado — o display QSPI usa o SPI2, NAO compartilhar
 uint32_t tLastSensor = 0, tLastUi = 0, tLastWx = 0, tLastMin = 0;
 uint32_t tLastLog = 0, tLastSensorRetry = 0;
 uint32_t bootMs;
@@ -873,9 +874,9 @@ void setup() {
   } else Serial.println("[BMP] falhou");
   st.qmi = qmiInit() ? ST_OK : ST_FAIL;
 
-  // SD card (GPIO38 CS, 39 MOSI, 40 MISO, 41 CLK) — log local tipo Tiny-Water-Station
-  SPI.begin(41, 40, 39, 38);
-  if (SD.begin(38)) {
+  // SD card (GPIO38 CS, 39 MOSI, 40 MISO, 41 CLK) em host SEPARADO do display
+  sdSPI.begin(41 /*CLK*/, 40 /*MISO*/, 39 /*MOSI*/, 38 /*SS*/);
+  if (SD.begin(38, sdSPI, 4000000)) {
     sdOk = true;
     Serial.println("[SD] ok");
     File f = SD.open("/estacao.csv", FILE_APPEND);
