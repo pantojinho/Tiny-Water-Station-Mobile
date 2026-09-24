@@ -196,3 +196,6 @@ config.local.ini
 # Pre-built binaries should be in releases, not repo
 firmware/build/
 firmware/.pio/build/
+software/estacao_meteo/.build/
+software/estacao_meteo/src_icons/
+*.log
