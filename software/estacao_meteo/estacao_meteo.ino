@@ -50,7 +50,7 @@
 #define BMP_ADDR BMP5XX_ALTERNATIVE_ADDRESS // 0x47
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(9, 10, 11, 12, 13, 14);
-Arduino_GFX *gfx = new Arduino_CO5300(bus, 21 /*RST*/, 2 /*rot: painel montado 180°*/, 280, 456,
+Arduino_GFX *gfx = new Arduino_CO5300(bus, 21 /*RST*/, 0 /*rot NATIVO — 180° fica por conta do LVGL*/, 280, 456,
                                       20, 0, 180, 24);
 
 // ============================ Config persistente =============================
@@ -203,13 +203,23 @@ static void ft_poll() {
     tX = (int16_t)x; tY = (int16_t)y; tDown = true;
   } else tDown = false;
 }
+static uint32_t tLastTouchLog = 0;
+static bool lastDown = false;
 static void touch_cb(lv_indev_t *, lv_indev_data_t *d) {
   ft_poll();
+  if (tDown && !lastDown) Serial.printf("[TOUCH] down raw=%d,%d\n", tX, tY);
+  if (!tDown && lastDown) Serial.println("[TOUCH] up");
+  if (tDown && millis() - tLastTouchLog > 500) {
+    tLastTouchLog = millis();
+    Serial.printf("[TOUCH] held raw=%d,%d\n", tX, tY);
+  }
+  lastDown = tDown;
   if (tDown) {
     d->state = LV_INDEV_STATE_PRESSED;
-    // painel fisicamente 180° vs nativo: inverte coordenadas p/ casar com rot=2
-    d->point.x = (scrW - 1) - tX;
-    d->point.y = (scrH - 1) - tY;
+    // coordenadas CRUAS: o LVGL 9 aplica a rotacao 180 do display no indev sozinho;
+    // inverter aqui tambem = dupla inversao = toque espelhado
+    d->point.x = tX;
+    d->point.y = tY;
   }
   else d->state = LV_INDEV_STATE_RELEASED;
 }
@@ -320,7 +330,7 @@ static void uiInit() {
   tabHome = lv_obj_create(scr);
   lv_obj_set_style_bg_opa(tabHome, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(tabHome, 0, 0);
-  lv_obj_set_size(tabHome, scrW, scrH - 52);
+  lv_obj_set_size(tabHome, scrW, scrH - 60);
   lv_obj_clear_flag(tabHome, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_pad_all(tabHome, 6, 0);
 
@@ -361,7 +371,7 @@ static void uiInit() {
   tabSensors = lv_obj_create(scr);
   lv_obj_set_style_bg_opa(tabSensors, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(tabSensors, 0, 0);
-  lv_obj_set_size(tabSensors, scrW, scrH - 52);
+  lv_obj_set_size(tabSensors, scrW, scrH - 60);
   lv_obj_clear_flag(tabSensors, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_pad_all(tabSensors, 6, 0);
   lv_obj_add_flag(tabSensors, LV_OBJ_FLAG_HIDDEN);
@@ -375,7 +385,7 @@ static void uiInit() {
   tabCfg = lv_obj_create(scr);
   lv_obj_set_style_bg_opa(tabCfg, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(tabCfg, 0, 0);
-  lv_obj_set_size(tabCfg, scrW, scrH - 52);
+  lv_obj_set_size(tabCfg, scrW, scrH - 60);
   lv_obj_set_style_pad_all(tabCfg, 6, 0);
 
   int32_t taW = scrW > scrH ? 240 : 200;
@@ -418,23 +428,23 @@ static void uiInit() {
 
   // ---------- Barra de navegação ----------
   navRow = lv_obj_create(scr);
-  lv_obj_set_size(navRow, scrW, 52);
+  lv_obj_set_size(navRow, scrW, 60);
   lv_obj_set_style_bg_color(navRow, lv_color_hex(0x10101a), 0);
   lv_obj_set_style_border_width(navRow, 0, 0);
   lv_obj_clear_flag(navRow, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_style_pad_all(navRow, 4, 0);
-  lv_obj_set_style_pad_column(navRow, 6, 0);
+  lv_obj_set_style_pad_all(navRow, 6, 0);
+  lv_obj_set_style_pad_column(navRow, 4, 0);
   lv_obj_set_flex_flow(navRow, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(navRow, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
   auto mkNav = [&](const char *txt, lv_event_cb_t cb) {
     lv_obj_t *b = lv_btn_create(navRow);
-    lv_obj_set_size(b, (scrW - 36) / 3, 40);
+    lv_obj_set_size(b, (scrW - 26) / 3, 46);
     lv_obj_set_style_bg_color(b, lv_color_hex(0x1a1a26), 0);
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_t *l = lv_label_create(b);
     lv_label_set_text(l, txt);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
     lv_obj_center(l);
     return b;
   };
@@ -454,7 +464,7 @@ static void layoutUi() {
     place(cWx, y, 88); y += 88 + 6;         // clima
     place(cRain, y, 48); y += 48 + 6;       // alerta chuva
     place(cS, y, 96); y += 96 + 6;          // sensores 2x2: temp/press/alt/umid
-    place(cSt, y, (int)scrH - 52 - 6 - y); // status preenche o resto
+    place(cSt, y, (int)scrH - 60 - 6 - y); // status preenche o resto
     lv_obj_align(lblClock, LV_ALIGN_TOP_MID, 0, 4);
     lv_obj_align(lblDate, LV_ALIGN_BOTTOM_MID, 0, -2);
     lv_obj_align(imgWx, LV_ALIGN_LEFT_MID, 4, 0);
@@ -473,8 +483,8 @@ static void layoutUi() {
     lv_obj_align(lblStWx, LV_ALIGN_BOTTOM_LEFT, 6, -4);
     lv_obj_align(lblStNet, LV_ALIGN_BOTTOM_RIGHT, -6, -4);
   } else { // paisagem 456x(216-44)
-    ch = (scrH - 52 - 6 * 2 - 6) / 2;
-    lv_obj_set_size(tabHome, scrW, scrH - 52);
+    ch = (scrH - 60 - 6 * 2 - 6) / 2;
+    lv_obj_set_size(tabHome, scrW, scrH - 60);
     lv_obj_set_pos(cClock, 6, 6);   lv_obj_set_size(cClock, cw / 4 - 3, ch);
     lv_obj_set_pos(cWx, 6 + cw / 4 + 3, 6); lv_obj_set_size(cWx, cw / 4 - 3, ch);
     lv_obj_set_pos(cRain, 6 + 2 * (cw / 4 + 3), 6); lv_obj_set_size(cRain, cw / 2 - 9, ch);
@@ -497,8 +507,8 @@ static void layoutUi() {
     lv_obj_align(lblStNet, LV_ALIGN_BOTTOM_MID, 0, 0);
   }
   // sensores / config seguem a orientação
-  lv_obj_set_size(tabSensors, scrW, scrH - 52);
-  lv_obj_set_size(tabCfg, scrW, scrH - 52);
+  lv_obj_set_size(tabSensors, scrW, scrH - 60);
+  lv_obj_set_size(tabCfg, scrW, scrH - 60);
   lv_obj_set_size(kb, scrW, (uint32_t)(scrH * 0.55));
   lv_obj_set_size(cG, cw, ch * 2 + 6);
   lv_obj_align(lblGyro, LV_ALIGN_TOP_LEFT, 4, 4);
@@ -852,10 +862,18 @@ void setup() {
   bufPx = scrW * 30;
   dbuf = (lv_color_t *)heap_caps_aligned_alloc(4, bufPx * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   disp = lv_display_create(scrW, scrH);
+  lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_180); // placa montada 180° — software, seguro
   lv_display_set_flush_cb(disp, disp_flush);
   lv_display_set_buffers(disp, dbuf, NULL, bufPx * 2, LV_DISPLAY_RENDER_MODE_PARTIAL);
   lv_display_add_event_cb(disp, disp_rounder, LV_EVENT_INVALIDATE_AREA, NULL);
 
+  { // diagnostico FT3168
+    Wire.beginTransmission(FT_ADDR);
+    uint8_t pr = Wire.endTransmission();
+    Serial.printf("[FT] probe 0x38: %s\n", pr == 0 ? "presente" : "AUSENTE");
+    Wire.beginTransmission(FT_ADDR); Wire.write((uint8_t)0xA8); Wire.endTransmission(false);
+    if (Wire.requestFrom(FT_ADDR, 1) == 1) Serial.printf("[FT] chip_id=0x%02X\n", Wire.read());
+  }
   lv_indev_t *indev = lv_indev_create();
   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(indev, touch_cb);
