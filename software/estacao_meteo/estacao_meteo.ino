@@ -233,8 +233,9 @@ static lv_obj_t *imgWx;        // emoji do clima
 static lv_obj_t *lblRainAlert; // banner "leva guarda-chuva"
 static lv_obj_t *cRain;        // card do alerta
 static lv_obj_t *lblGyro, *lblAcc, *lblStBmp, *lblStQmi, *lblStWx, *lblStNet, *lblRot;
-static lv_obj_t *taSsid, *taPass, *taLat, *taLon, *taTz, *kb;
+static lv_obj_t *lblCfgInfo;
 static lv_obj_t *cClock, *cWx, *cS, *cSt, *cG;
+static lv_obj_t *kb = nullptr; // (removido — config via web)
 static lv_style_t stCard, stTitle;
 
 static const char *wcodeDesc(int c) {
@@ -281,26 +282,7 @@ static void cb_nav_home(lv_event_t *) { navTo(tabHome, btnHome); }
 static void cb_nav_sens(lv_event_t *) { navTo(tabSensors, btnSens); }
 static void cb_nav_cfg(lv_event_t *) { navTo(tabCfg, btnCfg); }
 
-static void cb_save_cfg(lv_event_t *) {
-  strlcpy(cfg.ssid, lv_textarea_get_text(taSsid), sizeof(cfg.ssid));
-  strlcpy(cfg.pass, lv_textarea_get_text(taPass), sizeof(cfg.pass));
-  cfg.lat = strtof(lv_textarea_get_text(taLat), nullptr);
-  cfg.lon = strtof(lv_textarea_get_text(taLon), nullptr);
-  strlcpy(cfg.tz, lv_textarea_get_text(taTz), sizeof(cfg.tz));
-  cfgSave();
-  lv_obj_t *m = lv_msgbox_create(nullptr);
-  lv_msgbox_add_text(m, "Config salva!\nReinicie o dispositivo para aplicar.");
-  lv_obj_center(m);
-}
 static void cb_reboot(lv_event_t *) { delay(150); ESP.restart(); }
-
-static void cb_kb_hide(lv_event_t *) { lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN); }
-static void cb_ta_focus(lv_event_t *e) {
-  lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
-  lv_indev_wait_release(lv_indev_get_act());
-  lv_obj_clear_flag(kb, LV_OBJ_FLAG_HIDDEN);
-  lv_keyboard_set_textarea(kb, (lv_obj_t *)lv_event_get_target(e));
-}
 
 static lv_obj_t *makeCard(lv_obj_t *parent) {
   lv_obj_t *c = lv_obj_create(parent);
@@ -355,10 +337,10 @@ static void uiInit() {
   lv_obj_add_flag(cRain, LV_OBJ_FLAG_HIDDEN);
 
   cS = makeCard(tabHome);
-  lblBmpT = mkLabel(cS, &lv_font_montserrat_16, 0x6fd3ff);
-  lblBmpP = mkLabel(cS, &lv_font_montserrat_16, 0x9d8cff);
-  lblAlt = mkLabel(cS, &lv_font_montserrat_16, 0x7ddf87);
-  lblHum = mkLabel(cS, &lv_font_montserrat_16, 0xffd166);
+  lblBmpT = mkLabel(cS, &lv_font_montserrat_28, 0x6fd3ff);
+  lblBmpP = mkLabel(cS, &lv_font_montserrat_28, 0x9d8cff);
+  lblAlt = mkLabel(cS, &lv_font_montserrat_20, 0x7ddf87);
+  lblHum = mkLabel(cS, &lv_font_montserrat_20, 0xffd166);
   lblWxOut = mkLabel(cS, &lv_font_montserrat_12, 0x8fa3c8);
 
   cSt = makeCard(tabHome);
@@ -372,59 +354,47 @@ static void uiInit() {
   lv_obj_set_style_bg_opa(tabSensors, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(tabSensors, 0, 0);
   lv_obj_set_size(tabSensors, scrW, scrH - 60);
-  lv_obj_clear_flag(tabSensors, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_flex_flow(tabSensors, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_style_pad_all(tabSensors, 6, 0);
+  lv_obj_set_style_pad_row(tabSensors, 8, 0);
   lv_obj_add_flag(tabSensors, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_scroll_dir(tabSensors, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(tabSensors, LV_SCROLLBAR_MODE_AUTO);
 
   cG = makeCard(tabSensors);
+  lv_obj_set_width(cG, lv_pct(100));
+  lv_obj_set_height(cG, LV_SIZE_CONTENT);
   lblGyro = mkLabel(cG, &lv_font_montserrat_14, 0xd0d8e8);
+  lv_obj_align(lblGyro, LV_ALIGN_TOP_LEFT, 4, 2);
   lblAcc = mkLabel(cG, &lv_font_montserrat_14, 0xd0d8e8);
+  lv_obj_align(lblAcc, LV_ALIGN_TOP_LEFT, 4, 24);
   lblRot = mkLabel(cG, &lv_font_montserrat_12, 0x8fa3c8);
+  lv_obj_align(lblRot, LV_ALIGN_TOP_LEFT, 4, 46);
 
-  // ---------- Config ----------
+  // ---------- Config (só info — editar via web server) ----------
   tabCfg = lv_obj_create(scr);
-  lv_obj_set_style_bg_opa(tabCfg, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(tabCfg, 0, 0);
+  lv_obj_add_flag(tabCfg, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_size(tabCfg, scrW, scrH - 60);
-  lv_obj_set_style_pad_all(tabCfg, 6, 0);
+  lv_obj_set_flex_flow(tabCfg, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_style_pad_all(tabCfg, 8, 0);
+  lv_obj_set_style_pad_row(tabCfg, 8, 0);
 
-  int32_t taW = scrW > scrH ? 240 : 200;
-  auto mkTa = [&](const char *txt) {
-    lv_obj_t *ta = lv_textarea_create(tabCfg);
-    lv_obj_set_width(ta, taW);
-    lv_textarea_set_one_line(ta, true);
-    lv_obj_add_event_cb(ta, cb_ta_focus, LV_EVENT_FOCUSED, nullptr);
-    lv_textarea_set_text(ta, txt);
-    return ta;
-  };
-  mkLabel(tabCfg, &lv_font_montserrat_12, 0x8fa3c8);
-  taSsid = mkTa(cfg.ssid);
-  taPass = mkTa(cfg.pass);
-  lv_textarea_set_password_mode(taPass, true);
-  char b[32];
-  snprintf(b, sizeof(b), "%.4f", cfg.lat); taLat = mkTa(b);
-  snprintf(b, sizeof(b), "%.4f", cfg.lon); taLon = mkTa(b);
-  taTz = mkTa(cfg.tz);
+  lv_obj_t *cInfo = makeCard(tabCfg);
+  lv_obj_set_width(cInfo, lv_pct(100));
+  lv_obj_set_height(cInfo, LV_SIZE_CONTENT);
+  lblCfgInfo = mkLabel(cInfo, &lv_font_montserrat_14, 0xd0d8e8);
+  lv_label_set_long_mode(lblCfgInfo, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(lblCfgInfo, lv_pct(100));
 
-  lv_obj_t *btnSave = lv_btn_create(tabCfg);
-  lv_obj_set_size(btnSave, 90, 36);
-  lv_obj_add_event_cb(btnSave, cb_save_cfg, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *bl = lv_label_create(btnSave);
-  lv_label_set_text(bl, "Salvar");
-  lv_obj_center(bl);
-  lv_obj_t *btnReb = lv_btn_create(tabCfg);
-  lv_obj_set_size(btnReb, 90, 36);
+  lv_obj_t *cReb = makeCard(tabCfg);
+  lv_obj_set_width(cReb, lv_pct(100));
+  lv_obj_set_height(cReb, LV_SIZE_CONTENT);
+  lv_obj_t *btnReb = lv_btn_create(cReb);
+  lv_obj_set_size(btnReb, 140, 46);
   lv_obj_add_event_cb(btnReb, cb_reboot, LV_EVENT_CLICKED, nullptr);
-  bl = lv_label_create(btnReb);
+  lv_obj_t *bl = lv_label_create(btnReb);
   lv_label_set_text(bl, "Reiniciar");
   lv_obj_center(bl);
-
-  // teclado (em cima de tudo)
-  kb = lv_keyboard_create(scr);
-  lv_obj_set_size(kb, scrW, (uint32_t)(scrH * 0.55));
-  lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_add_event_cb(kb, cb_kb_hide, LV_EVENT_CANCEL, nullptr);
-  lv_obj_move_foreground(kb);
 
   // ---------- Barra de navegação ----------
   navRow = lv_obj_create(scr);
@@ -448,6 +418,7 @@ static void uiInit() {
     lv_obj_center(l);
     return b;
   };
+  lv_obj_move_foreground(navRow);
   btnHome = mkNav("Clima", cb_nav_home);
   btnSens = mkNav("Sensores", cb_nav_sens);
   btnCfg = mkNav("Config", cb_nav_cfg);
@@ -460,11 +431,11 @@ static void layoutUi() {
   if (!h) { // retrato 280x412 util
     auto place = [&](lv_obj_t *c, int y, int hh) { lv_obj_set_pos(c, 6, y); lv_obj_set_size(c, cw, hh); };
     int y = 6;
-    place(cClock, y, 88); y += 88 + 6;      // relógio 48px + data com folga
-    place(cWx, y, 88); y += 88 + 6;         // clima
-    place(cRain, y, 48); y += 48 + 6;       // alerta chuva
-    place(cS, y, 96); y += 96 + 6;          // sensores 2x2: temp/press/alt/umid
-    place(cSt, y, (int)scrH - 60 - 6 - y); // status preenche o resto
+    place(cClock, y, 84); y += 84 + 6;      // relógio
+    place(cS, y, 128); y += 128 + 6;        // SENSORES (principal) 2x2 grande
+    place(cWx, y, 78); y += 78 + 6;         // previsao compacta
+    place(cRain, y, 44); y += 44 + 6;       // alerta chuva
+    place(cSt, y, (int)scrH - 60 - 6 - y); // status
     lv_obj_align(lblClock, LV_ALIGN_TOP_MID, 0, 4);
     lv_obj_align(lblDate, LV_ALIGN_BOTTOM_MID, 0, -2);
     lv_obj_align(imgWx, LV_ALIGN_LEFT_MID, 4, 0);
@@ -473,10 +444,10 @@ static void layoutUi() {
     lv_obj_align(lblWxMini, LV_ALIGN_BOTTOM_RIGHT, -8, -4);
     lv_obj_align(lblRainAlert, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_width(lblRainAlert, cw - 16);
-    lv_obj_align(lblBmpT, LV_ALIGN_TOP_LEFT, 8, 6);
-    lv_obj_align(lblBmpP, LV_ALIGN_TOP_RIGHT, -8, 6);
-    lv_obj_align(lblAlt, LV_ALIGN_BOTTOM_LEFT, 8, -6);
-    lv_obj_align(lblHum, LV_ALIGN_BOTTOM_RIGHT, -8, -6);
+    lv_obj_align(lblBmpT, LV_ALIGN_TOP_LEFT, 10, 4);
+    lv_obj_align(lblBmpP, LV_ALIGN_TOP_RIGHT, -10, 4);
+    lv_obj_align(lblAlt, LV_ALIGN_BOTTOM_LEFT, 10, -4);
+    lv_obj_align(lblHum, LV_ALIGN_BOTTOM_RIGHT, -10, -4);
     lv_obj_align(lblWxOut, LV_ALIGN_CENTER, 0, 0);
     lv_obj_align(lblStBmp, LV_ALIGN_TOP_LEFT, 6, 4);
     lv_obj_align(lblStQmi, LV_ALIGN_TOP_RIGHT, -6, 4);
@@ -509,11 +480,6 @@ static void layoutUi() {
   // sensores / config seguem a orientação
   lv_obj_set_size(tabSensors, scrW, scrH - 60);
   lv_obj_set_size(tabCfg, scrW, scrH - 60);
-  lv_obj_set_size(kb, scrW, (uint32_t)(scrH * 0.55));
-  lv_obj_set_size(cG, cw, ch * 2 + 6);
-  lv_obj_align(lblGyro, LV_ALIGN_TOP_LEFT, 4, 4);
-  lv_obj_align(lblAcc, LV_ALIGN_TOP_LEFT, 4, 30);
-  lv_obj_align(lblRot, LV_ALIGN_BOTTOM_LEFT, 4, 0);
 }
 
 static void applyRotation(int rot) {
@@ -531,41 +497,63 @@ DNSServer dns;
 static const char PAGE[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="pt-br"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Estacao Meteo</title><style>
-body{font-family:sans-serif;background:#0d0d15;color:#dde;margin:0;padding:16px;max-width:560px;margin:auto}
-h1{font-size:1.3em}.c{background:#16161f;border:1px solid #2a2a3a;border-radius:10px;padding:12px;margin:10px 0}
-.k{color:#8fa3c8;font-size:.85em}.v{font-size:1.15em;margin:2px 0}
-input{width:95%;padding:8px;margin:4px 0;border-radius:6px;border:1px solid #2a2a3a;background:#101018;color:#dde}
-button{padding:10px 18px;border-radius:8px;border:0;background:#2f6fed;color:#fff;font-size:1em;margin:6px 4px}
-.r{color:#7ddf87}.e{color:#ff7d7d}</style></head><body>
-<h1>Estacao Meteorologica</h1>
-<div class="c" id="s">Carregando...</div>
-<div class="c"><b>Configuracao</b>
+*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0b0b13;color:#e8ecf4;margin:0;padding:16px;max-width:720px;margin:auto}
+h1{font-size:1.25em;margin:.2em 0 .6em}.sub{color:#7c8bb0;font-size:.8em;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.c{background:#14141f;border:1px solid #262640;border-radius:12px;padding:12px}
+.k{color:#7c8bb0;font-size:.72em;text-transform:uppercase;letter-spacing:.05em}
+.v{font-size:1.55em;font-weight:600;margin:4px 0 2px}.u{color:#7c8bb0;font-size:.8em}
+.big{grid-column:1/-1;display:flex;align-items:center;gap:14px}
+.big .v{font-size:2.6em;margin:0}
+.wxicon{font-size:3em;line-height:1}
+.ok{color:#57d98a}.bad{color:#ff7d7d}.warn{color:#ffd166}
+.rain{grid-column:1/-1;background:#2a2210;border-color:#6a5514}
+details{grid-column:1/-1;background:#14141f;border:1px solid #262640;border-radius:12px;padding:10px 12px}
+summary{cursor:pointer;color:#9fb0d8;font-weight:600}
+input{width:100%;padding:9px;margin:3px 0 10px;border-radius:8px;border:1px solid #262640;background:#0f0f18;color:#e8ecf4}
+button{padding:11px 20px;border-radius:9px;border:0;background:#2f6fed;color:#fff;font-size:.95em;margin:4px 4px 0;cursor:pointer}
+button:hover{background:#2456c4}#msg{color:#57d98a;margin-left:8px}
+.row{display:flex;flex-wrap:wrap;gap:6px;color:#7c8bb0;font-size:.78em;margin-top:10px}
+</style></head><body>
+<h1>&#9729;&#65039; Estacao Meteorologica</h1>
+<div class="sub" id="sub">carregando...</div>
+<div class="grid" id="g"></div>
+<details><summary>&#9881;&#65039; Configuracao</summary>
 <div class="k">WiFi SSID</div><input id="ssid">
 <div class="k">Senha WiFi</div><input id="pass" type="password">
-<div class="k">Latitude</div><input id="lat">
-<div class="k">Longitude</div><input id="lon">
+<div style="display:flex;gap:10px"><div style="flex:1"><div class="k">Latitude</div><input id="lat"></div>
+<div style="flex:1"><div class="k">Longitude</div><input id="lon"></div></div>
 <div class="k">Fuso (TZ)</div><input id="tz">
-<button onclick="save()">Salvar</button><button onclick="fetch('/api/reboot')">Reiniciar</button>
-<span id="msg"></span></div>
+<button onclick="save()">&#128190; Salvar</button>
+<button onclick="location='/api/reboot'">&#128260; Reiniciar</button><span id="msg"></span>
+</details>
+<div class="row" id="foot"></div>
 <script>
+const WMO={0:['&#2600;&#65039;','Ceu limpo'],1:['&#127780;','Predom. sol'],2:['&#9925;','Parc. nublado'],3:['&#9729;&#65039;','Nublado'],45:['&#127787;','Nevoeiro'],48:['&#127787;','Nevoeiro'],51:['&#127783;','Garoa'],53:['&#127783;','Garoa'],55:['&#127783;','Garoa'],61:['&#127783;','Chuva fraca'],63:['&#127783;','Chuva'],65:['&#127783;','Chuva forte'],71:['&#10052;&#65039;','Neve'],80:['&#127783;','Pancadas'],81:['&#127783;','Pancadas'],82:['&#9889;','Pancadas fortes'],95:['&#9889;','Tempestade'],96:['&#9889;','Tempestade c/ granizo']};
+function em(c){return (WMO[c]||['&#9925;','-'])[0]}
+function ds(c){return (WMO[c]||['-'])[1]}
 async function up(){
- try{const r=await(await fetch('/api/status')).json();
- const ok=v=>v?'<span class="r">OK</span>':'<span class="e">FALHA</span>';
- document.getElementById('s').innerHTML=`<div class="v">${r.clock}</div>
- <div class="k">Local: ${r.loc} (${r.lat.toFixed(3)}, ${r.lon.toFixed(3)}) TZ ${r.tz}</div>
- <div class="v">Tempo agora: ${r.wx_desc} ${r.outdoor_temp.toFixed(1)}C (min ${r.tmin.toFixed(0)} / max ${r.tmax.toFixed(0)})</div>
- <div class="v">Chuva: ${r.rain_in_h<0?'sem previsao proximas 12h':(r.rain_in_h===0?'CHOVENDO AGORA ('+r.rain_mm+' mm)':'em '+r.rain_in_h+'h ('+r.rain_prob+'%, '+r.rain_mm+' mm)')}</div>
- <div class="k">BMP581: ${ok(r.bmp_ok)} ${r.bmp_temp.toFixed(1)}C ${r.bmp_press.toFixed(1)}hPa &middot; alt ${r.altitude}m</div>
- <div class="v">Umidade relativa: ${r.humidity<0?'--':r.humidity+'%'}</div>
- <div class="k">QMI8658: ${ok(r.qmi_ok)} giro ${r.gyro.join('/')} dps</div>
- <div class="k">Rede: ${r.net} &middot; IP ${r.ip} &middot; atualizado ha ${r.wx_age_min} min</div>`;
- }catch(e){}
-}
+try{const r=await(await fetch('/api/status')).json();
+const ok=v=>v?'<span class="ok">&#10003; OK</span>':'<span class="bad">&#10007; falha</span>';
+document.getElementById('sub').innerHTML=`${r.loc} &middot; ${r.clock} &middot; IP ${r.ip}`;
+let rain='';
+if(r.rain_in_h===0)rain='<div class="c rain"><div class="k">&#9889; Alerta</div><div class="v warn">CHOVENDO AGORA</div><div class="u">'+r.rain_mm+' mm &mdash; leva guarda-chuva!</div></div>';
+else if(r.rain_in_h>0)rain='<div class="c rain"><div class="k">&#9889; Alerta</div><div class="v warn">Chuva em '+r.rain_in_h+'h</div><div class="u">'+r.rain_prob+'% &middot; '+r.rain_mm+' mm</div></div>';
+document.getElementById('g').innerHTML=
+`<div class="c big"><div class="wxicon">${em(r.wcode)}</div><div><div class="v">${r.outdoor_temp.toFixed(1)}&deg;C</div><div class="u">${ds(r.wcode)} &middot; fora &middot; min ${r.tmin.toFixed(0)} / max ${r.tmax.toFixed(0)}</div></div></div>`
++rain+
+`<div class="c"><div class="k">BMP581 temperatura</div><div class="v" style="color:#6fd3ff">${r.bmp_temp.toFixed(1)}<span class="u">&deg;C</span></div><div class="u">${ok(r.bmp_ok)}</div></div>
+<div class="c"><div class="k">Pressao local</div><div class="v" style="color:#b8a6ff">${r.bmp_press.toFixed(0)}<span class="u"> hPa</span></div><div class="u">nivel do mar ${r.press_msl} hPa</div></div>
+<div class="c"><div class="k">Altitude</div><div class="v" style="color:#7ddf87">${r.altitude}<span class="u"> m</span></div><div class="u">barometrica</div></div>
+<div class="c"><div class="k">Umidade relativa</div><div class="v" style="color:#ffd166">${r.humidity<0?'--':r.humidity}<span class="u">%</span></div><div class="u">Open-Meteo</div></div>
+<div class="c"><div class="k">Giroscopio</div><div class="v" style="font-size:1em;color:#d0d8e8">${r.gyro.map(g=>g.toFixed(0)).join(' / ')}</div><div class="u">dps &middot; QMI8658 ${ok(r.qmi_ok)}</div></div>`;
+document.getElementById('foot').innerHTML=`Previsao: ${ok(r.wx_desc!=='')} &middot; atualizada ha ${r.wx_age_min} min &middot; rede ${r.net}`;
+ssid.value=r.loc?ssid.value:''; if(!ssid.value)ssid.value='';
+}catch(e){document.getElementById('sub').textContent='dispositivo offline'}}
 async function save(){
- const b={ssid:ssid.value,pass:pass.value,lat:parseFloat(lat.value),lon:parseFloat(lon.value),tz:tz.value};
- const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
- document.getElementById('msg').textContent=r.ok?'Salvo! Reinicie.':'Erro';
-}
+const b={ssid:ssid.value,pass:pass.value,lat:parseFloat(lat.value),lon:parseFloat(lon.value),tz:tz.value};
+const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+document.getElementById('msg').textContent=r.ok?'Salvo! Reinicie.':'Erro ao salvar';}
 setInterval(up,5000);up();
 </script></body></html>)HTML";
 
@@ -579,9 +567,10 @@ void geoLocate() {
   h.setConnectTimeout(5000); h.setTimeout(5000);
   if (!h.begin("http://ip-api.com/json/?fields=status,lat,lon,timezone,city")) return;
   if (h.GET() == 200) {
-    JsonDocument d;
-    if (!deserializeJson(d, h.getString())) {
-      if (d["status"] == "success") {
+    JsonDocument *dp = new JsonDocument();
+    JsonDocument &d = *dp;
+    bool ok = !deserializeJson(d, h.getString());
+    if (ok && d["status"] == "success") {
         st.lat = d["lat"] | 0.0f;
         st.lon = d["lon"] | 0.0f;
         strlcpy(st.tzName, d["timezone"] | "UTC", sizeof(st.tzName));
@@ -595,15 +584,15 @@ void geoLocate() {
           configTzTime(cfg.tz, "pool.ntp.org", "time.nist.gov");
         }
         Serial.printf("[GEO] %s %.4f,%.4f tz=%s\n", st.locName, st.lat, st.lon, st.tzName);
-      }
     }
+    delete dp;
   }
   h.end();
 }
 void fetchWeather() {
   if (WiFi.status() != WL_CONNECTED) return;
   HTTPClient h;
-  h.setConnectTimeout(5000); h.setTimeout(8000);
+  h.setConnectTimeout(3000); h.setTimeout(4000); // travar o loop o minimo possivel
   char url[512];
   snprintf(url, sizeof(url),
            "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
@@ -615,7 +604,8 @@ void fetchWeather() {
   if (!h.begin(url)) { Serial.println("[WX] begin falhou (url?)"); return; }
   int code = h.GET();
   if (code == 200) {
-    JsonDocument d;
+    JsonDocument *dp = new JsonDocument();
+    JsonDocument &d = *dp;
     if (!deserializeJson(d, h.getString())) {
       st.outdoorTemp = d["current"]["temperature_2m"] | 0.0f;
       st.wcode = d["current"]["weather_code"] | -1;
@@ -648,6 +638,7 @@ void fetchWeather() {
       Serial.printf("[WX] %.1fC %s | chuva: prob=%d%% em %dh (%.1fmm)\n",
                     st.outdoorTemp, st.wxDesc, st.rainProb, st.rainInH, st.rainMm);
     }
+    delete dp;
   } else {
     Serial.printf("[WX] HTTP %d\n", code);
   }
@@ -710,6 +701,26 @@ void webStart() {
   server.begin();
 }
 
+// tendencia de pressao (3h, amostra a cada 10min) — previsao LOCAL
+#define PTREND_N 18
+static float ptrendBuf[PTREND_N];
+static int ptrendCnt = 0, ptrendHead = 0;
+static uint32_t tLastPtrend = 0;
+void ptrendSample() {
+  if (st.bmp != ST_OK || st.bmpPress < 300) return;
+  ptrendBuf[ptrendHead] = st.bmpPress;
+  ptrendHead = (ptrendHead + 1) % PTREND_N;
+  if (ptrendCnt < PTREND_N) ptrendCnt++;
+}
+// hPa/3h: <-1.5 chuva provavel, >+1.5 melhoria
+float ptrendDelta() {
+  if (ptrendCnt < 6) return 0; // precisa >= 1h de dados
+  int oldest = (ptrendHead - ptrendCnt + PTREND_N) % PTREND_N;
+  float span_h = (ptrendCnt - 1) * (10.0f / 60.0f);
+  if (span_h < 0.5f) return 0;
+  return (st.bmpPress - ptrendBuf[oldest]) / span_h * 3.0f;
+}
+
 bool sdOk = false;
 uint32_t tLastSd = 0;
 SPIClass sdSPI(HSPI); // SPI3_HOST dedicado — o display QSPI usa o SPI2, NAO compartilhar
@@ -719,11 +730,12 @@ uint32_t bootMs;
 
 void debugLog() {
   char b[160];
+  time_t nowt = time(nullptr);
+  struct tm tmv; localtime_r(&nowt, &tmv);
   snprintf(b, sizeof(b),
-           "[ST] rot=%d acc=%.2f/%.2f/%.2f BMP=%s %.1fC %.1fhPa QMI=%s WiFi=%s IP=%s WX=%s",
-           st.rot, st.acc[0], st.acc[1], st.acc[2],
-           st.bmp == ST_OK ? "OK" : "FALHA", st.bmpTemp, st.bmpPress,
-           st.qmi == ST_OK ? "OK" : "FALHA",
+           "[ST] %02d:%02d BMP=%s %.1fC %.1fhPa ptrend=%+.1f WiFi=%s IP=%s WX=%s",
+           tmv.tm_hour, tmv.tm_min,
+           st.bmp == ST_OK ? "OK" : "FALHA", st.bmpTemp, st.bmpPress, ptrendDelta(),
            st.apMode ? "AP" : (WiFi.status() == WL_CONNECTED ? "OK" : "off"),
            ipStr().c_str(),
            st.wxValid ? "OK" : "--");
@@ -773,7 +785,11 @@ static void uiTick() {
     snprintf(b, sizeof(b), "%.1f C", st.outdoorTemp);
     lv_label_set_text(lblWxTemp, b);
     lv_label_set_text(lblWxDesc, st.wxDesc);
-    snprintf(b, sizeof(b), "min %.0f  max %.0f  (ha %lumin)", st.tmin, st.tmax, (unsigned long)st.wxAgeMin);
+    float pd = ptrendDelta();
+    const char *trend = "";
+    if (pd < -1.5f) trend = " | pressao caindo: chuva provavel";
+    else if (pd > 1.5f) trend = " | pressao subindo: tempo firma";
+    snprintf(b, sizeof(b), "min %.0f  max %.0f%s", st.tmin, st.tmax, trend);
     lv_label_set_text(lblWxMini, b);
     lv_image_set_src(imgWx, wcodeIcon(st.wcode));
     // alerta de chuva
@@ -828,6 +844,14 @@ static void uiTick() {
     snprintf(b, sizeof(b), "IP %s", ip.c_str());
   }
   lv_label_set_text(lblStNet, b);
+
+  snprintf(b, sizeof(b),
+           "WiFi: %s\nIP: %s\nLocal: %s\nFuso: %s\n\nPara editar WiFi/local/fuso,\nacesse http://%s/\nno navegador do celular ou PC.",
+           st.apMode ? "AP (EstacaoMeteo)" : cfg.ssid,
+           ipStr().c_str(),
+           strlen(cfg.city) ? cfg.city : "manual",
+           cfg.tz, ipStr().c_str());
+  lv_label_set_text(lblCfgInfo, b);
 
   if (st.qmi == ST_OK) {
     snprintf(b, sizeof(b), "Giro: %+.0f %+.0f %+.0f dps", st.gyro[0], st.gyro[1], st.gyro[2]);
@@ -910,6 +934,7 @@ void setup() {
   }
 
   bootMs = millis();
+  tLastPtrend = millis() - 570000; // 1a amostra ~3min apos boot
   Serial.println("[RUN] loop");
 }
 
@@ -922,7 +947,8 @@ void loop() {
   if (ms - tLastSensor >= 200) {
     tLastSensor = ms;
     if (st.qmi == ST_OK) qmiRead();
-    if (st.bmp == ST_OK) bmpRead();
+    static uint32_t tLastBmp = 0;
+    if (st.bmp == ST_OK && ms - tLastBmp >= 1000) { tLastBmp = ms; bmpRead(); }
 
     // retry de sensores que falharam no boot (ex.: plugados depois)
     if ((st.bmp == ST_FAIL || st.qmi == ST_FAIL) && ms - tLastSensorRetry >= 5000) {
@@ -944,6 +970,7 @@ void loop() {
   }
 
   if (ms - tLastUi >= 500) { tLastUi = ms; uiTick(); }
+  if (ms - tLastPtrend >= 600000UL) { tLastPtrend = ms; ptrendSample(); } // 10min
 
   if (sdOk && ms - tLastSd >= 60000) {
     tLastSd = ms;
