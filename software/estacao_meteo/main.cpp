@@ -180,6 +180,11 @@ static uint32_t scrW, scrH, bufPx;
 
 static uint32_t millis_cb() { return millis(); }
 
+static void disp_rounder(lv_event_t *e) {
+  lv_area_t *a = (lv_area_t *)lv_event_get_param(e);
+  a->x1 = 0; a->x2 = (int32_t)scrW - 1;
+}
+
 static void disp_flush(lv_display_t *d, const lv_area_t *area, uint8_t *px) {
   uint32_t w = lv_area_get_width(area), h = lv_area_get_height(area);
   // LVGL 9 entrega RGB565 na ordem que o Arduino_GFX espera — NAO fazer swap
@@ -703,12 +708,13 @@ void setup() {
     if (w && h) { scrW = w; scrH = h; }
   }
   Serial.printf("[LVGL] logico %ux%u (paisagem)\n", scrW, scrH);
-  bufPx = scrW * 40;
+  bufPx = scrW * 30;
   dbuf = (lv_color_t *)heap_caps_aligned_alloc(4, bufPx * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   lv_display_set_flush_cb(disp, disp_flush);
   lv_display_set_buffers(disp, dbuf, NULL, bufPx * 2, LV_DISPLAY_RENDER_MODE_PARTIAL);
-  // SEM rounder: com ROTATION_270 o LVGL entrega areas ja em coords fisicas;
-  // forcar largura logica (456) num painel fisico de 280 = tela rosa/raios.
+  // Rounder OBRIGATORIO neste painel: flush sempre de linha logica inteira.
+  // Blits parciais rotacionados corrompem o CO5300 (tela rosa). Provado em 18:32.
+  lv_display_add_event_cb(disp, disp_rounder, LV_EVENT_INVALIDATE_AREA, NULL);
 
 
   uiInit();
