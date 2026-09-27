@@ -40,6 +40,9 @@
 #define WIFI_SSID_DEFAULT "Desktop_F8423541"
 #define WIFI_PASS_DEFAULT "Inicial123"
 
+// Sem rede STA por este tempo = vira AP de configuracao (10 min)
+#define AP_FALLBACK_MS 600000UL
+
 // ============================ Pinos / hardware ===============================
 #define TOUCH_SDA 47
 #define TOUCH_SCL 48
@@ -187,56 +190,15 @@ static void disp_rounder(lv_event_t *e) {
   a->x1 = 0; a->x2 = (int32_t)scrW - 1;
 }
 
-// ============================ LVGL: touch FT3168 =============================
-static int16_t tX, tY;
-static bool tDown;
-static void ft_poll() {
-  uint8_t b[5] = {0};
-  Wire.beginTransmission(FT_ADDR);
-  Wire.write((uint8_t)0x02);
-  if (Wire.endTransmission(false) != 0) { tDown = false; return; }
-  if (Wire.requestFrom(FT_ADDR, 5) != 5) { tDown = false; return; }
-  for (int i = 0; i < 5; i++) b[i] = Wire.read();
-  if (b[0] & 0x0F) {
-    uint16_t x = ((b[1] & 0x0F) << 8) | b[2];
-    uint16_t y = ((b[3] & 0x0F) << 8) | b[4];
-    tX = (int16_t)x; tY = (int16_t)y; tDown = true;
-  } else tDown = false;
-}
-static uint32_t tLastTouchLog = 0;
-static bool lastDown = false;
-static void touch_cb(lv_indev_t *, lv_indev_data_t *d) {
-  ft_poll();
-  if (tDown && !lastDown) Serial.printf("[TOUCH] down raw=%d,%d\n", tX, tY);
-  if (!tDown && lastDown) Serial.println("[TOUCH] up");
-  if (tDown && millis() - tLastTouchLog > 500) {
-    tLastTouchLog = millis();
-    Serial.printf("[TOUCH] held raw=%d,%d\n", tX, tY);
-  }
-  lastDown = tDown;
-  if (tDown) {
-    d->state = LV_INDEV_STATE_PRESSED;
-    // coordenadas CRUAS: o LVGL 9 aplica a rotacao 180 do display no indev sozinho;
-    // inverter aqui tambem = dupla inversao = toque espelhado
-    d->point.x = tX;
-    d->point.y = tY;
-  }
-  else d->state = LV_INDEV_STATE_RELEASED;
-}
 
 // ============================ UI =============================================
-static lv_obj_t *tabHome, *tabSensors, *tabCfg;
-static lv_obj_t *navRow, *btnHome, *btnSens, *btnCfg;
+static lv_obj_t *tabHome;
 static lv_obj_t *lblClock, *lblDate, *lblWxTemp, *lblWxDesc, *lblWxMini;
 static lv_obj_t *lblBmpT, *lblBmpP, *lblWxOut, *lblAlt, *lblHum;
 static lv_obj_t *imgWx;        // emoji do clima
-static lv_obj_t *lblRainAlert; // banner "leva guarda-chuva"
-static lv_obj_t *cRain;        // card do alerta
-static lv_obj_t *lblGyro, *lblAcc, *lblStBmp, *lblStQmi, *lblStWx, *lblStNet, *lblRot;
-static lv_obj_t *lblCfgInfo;
-static lv_obj_t *cClock, *cWx, *cS, *cSt, *cG;
-static lv_obj_t *kb = nullptr; // (removido — config via web)
-static lv_style_t stCard, stTitle;
+static lv_obj_t *lblStBmp, *lblStWx, *lblStNet;
+static lv_obj_t *cClock, *cWx, *cS, *cSt;
+static lv_style_t stCard;
 
 static const char *wcodeDesc(int c) {
   switch (c) {
@@ -267,22 +229,6 @@ static const lv_image_dsc_t *wcodeIcon(int c) {
   return &icon_cloud;
 }
 
-static void navTo(lv_obj_t *tab, lv_obj_t *btn) {
-  lv_obj_t *tabs[] = {tabHome, tabSensors, tabCfg};
-  lv_obj_t *btns[] = {btnHome, btnSens, btnCfg};
-  for (int i = 0; i < 3; i++) {
-    lv_obj_add_flag(tabs[i], LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_bg_color(btns[i], lv_color_hex(0x1a1a26), 0);
-  }
-  lv_obj_clear_flag(tab, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_set_style_bg_color(btn, lv_color_hex(0x2f6fed), 0);
-  lv_obj_scroll_to(tab, 0, 0, LV_ANIM_OFF);
-}
-static void cb_nav_home(lv_event_t *) { navTo(tabHome, btnHome); }
-static void cb_nav_sens(lv_event_t *) { navTo(tabSensors, btnSens); }
-static void cb_nav_cfg(lv_event_t *) { navTo(tabCfg, btnCfg); }
-
-static void cb_reboot(lv_event_t *) { delay(150); ESP.restart(); }
 
 static lv_obj_t *makeCard(lv_obj_t *parent) {
   lv_obj_t *c = lv_obj_create(parent);
@@ -308,179 +254,65 @@ static void uiInit() {
   lv_obj_t *scr = lv_screen_active();
   lv_obj_set_style_bg_color(scr, lv_color_hex(0x0a0a12), 0);
 
-  // ---------- Home ----------
+  // ---------- Tela estatica (sem touch/menu): 3 linhas ----------
   tabHome = lv_obj_create(scr);
   lv_obj_set_style_bg_opa(tabHome, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(tabHome, 0, 0);
-  lv_obj_set_size(tabHome, scrW, scrH - 60);
+  lv_obj_set_size(tabHome, scrW, scrH);
   lv_obj_clear_flag(tabHome, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_pad_all(tabHome, 6, 0);
 
+  uint32_t cw = scrW - 12;          // largura util
+  uint32_t ch1 = 92, ch2 = 88;      // linhas 1 e 2
+  uint32_t ch3 = scrH - 12 - ch1 - ch2 - 12; // linha 3 (rede)
+
+  // linha 1: relogio | clima
   cClock = makeCard(tabHome);
+  lv_obj_set_pos(cClock, 0, 0);
+  lv_obj_set_size(cClock, cw / 3 - 3, ch1);
   lblClock = mkLabel(cClock, &lv_font_montserrat_48, 0xffffff);
   lblDate = mkLabel(cClock, &lv_font_montserrat_14, 0x8fa3c8);
+  lv_obj_align(lblClock, LV_ALIGN_TOP_MID, 0, 4);
+  lv_obj_align(lblDate, LV_ALIGN_BOTTOM_MID, 0, -6);
 
   lv_obj_t *cWx2 = makeCard(tabHome);
+  lv_obj_set_pos(cWx2, cw / 3 + 3, 0);
+  lv_obj_set_size(cWx2, cw - (cw / 3 + 3), ch1);
   imgWx = lv_image_create(cWx2);
   lv_image_set_src(imgWx, &icon_cloud);
   lblWxTemp = mkLabel(cWx2, &lv_font_montserrat_28, 0xffc857);
   lblWxDesc = mkLabel(cWx2, &lv_font_montserrat_14, 0xd0d8e8);
   lblWxMini = mkLabel(cWx2, &lv_font_montserrat_12, 0x8fa3c8);
   cWx = cWx2;
+  lv_obj_align(imgWx, LV_ALIGN_LEFT_MID, 2, 0);
+  lv_obj_align(lblWxTemp, LV_ALIGN_TOP_LEFT, 96, 6);
+  lv_obj_align(lblWxDesc, LV_ALIGN_BOTTOM_LEFT, 96, -24);
+  lv_obj_align(lblWxMini, LV_ALIGN_BOTTOM_LEFT, 96, -4);
 
-  // banner de alerta de chuva
-  cRain = makeCard(tabHome);
-  lv_obj_set_style_bg_color(cRain, lv_color_hex(0x3a2a10), 0);
-  lv_obj_set_style_border_color(cRain, lv_color_hex(0x8a6a1a), 0);
-  lblRainAlert = mkLabel(cRain, &lv_font_montserrat_14, 0xffd166);
-  lv_label_set_long_mode(lblRainAlert, LV_LABEL_LONG_WRAP);
-  lv_obj_add_flag(cRain, LV_OBJ_FLAG_HIDDEN);
-
+  // linha 2: sensores locais em faixa
   cS = makeCard(tabHome);
+  lv_obj_set_pos(cS, 0, ch1 + 6);
+  lv_obj_set_size(cS, cw, ch2);
+  lv_obj_set_flex_flow(cS, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(cS, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lblBmpT = mkLabel(cS, &lv_font_montserrat_28, 0x6fd3ff);
   lblBmpP = mkLabel(cS, &lv_font_montserrat_28, 0x9d8cff);
   lblAlt = mkLabel(cS, &lv_font_montserrat_20, 0x7ddf87);
   lblHum = mkLabel(cS, &lv_font_montserrat_20, 0xffd166);
   lblWxOut = mkLabel(cS, &lv_font_montserrat_12, 0x8fa3c8);
 
+  // linha 3: REDE — IP em destaque pra acesso via web
   cSt = makeCard(tabHome);
+  lv_obj_set_pos(cSt, 0, ch1 + ch2 + 12);
+  lv_obj_set_size(cSt, cw, ch3);
+  lblStNet = mkLabel(cSt, &lv_font_montserrat_28, 0x57d98a);
+  lblStWx = mkLabel(cSt, &lv_font_montserrat_12, 0x8fa3c8);
   lblStBmp = mkLabel(cSt, &lv_font_montserrat_12, 0x666677);
-  lblStQmi = mkLabel(cSt, &lv_font_montserrat_12, 0x666677);
-  lblStWx = mkLabel(cSt, &lv_font_montserrat_12, 0x666677);
-  lblStNet = mkLabel(cSt, &lv_font_montserrat_12, 0x666677);
-
-  // ---------- Sensores ----------
-  tabSensors = lv_obj_create(scr);
-  lv_obj_set_style_bg_opa(tabSensors, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(tabSensors, 0, 0);
-  lv_obj_set_size(tabSensors, scrW, scrH - 60);
-  lv_obj_set_flex_flow(tabSensors, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_all(tabSensors, 6, 0);
-  lv_obj_set_style_pad_row(tabSensors, 8, 0);
-  lv_obj_add_flag(tabSensors, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_set_scroll_dir(tabSensors, LV_DIR_VER);
-  lv_obj_set_scrollbar_mode(tabSensors, LV_SCROLLBAR_MODE_AUTO);
-
-  cG = makeCard(tabSensors);
-  lv_obj_set_width(cG, lv_pct(100));
-  lv_obj_set_height(cG, LV_SIZE_CONTENT);
-  lblGyro = mkLabel(cG, &lv_font_montserrat_14, 0xd0d8e8);
-  lv_obj_align(lblGyro, LV_ALIGN_TOP_LEFT, 4, 2);
-  lblAcc = mkLabel(cG, &lv_font_montserrat_14, 0xd0d8e8);
-  lv_obj_align(lblAcc, LV_ALIGN_TOP_LEFT, 4, 24);
-  lblRot = mkLabel(cG, &lv_font_montserrat_12, 0x8fa3c8);
-  lv_obj_align(lblRot, LV_ALIGN_TOP_LEFT, 4, 46);
-
-  // ---------- Config (só info — editar via web server) ----------
-  tabCfg = lv_obj_create(scr);
-  lv_obj_add_flag(tabCfg, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_set_size(tabCfg, scrW, scrH - 60);
-  lv_obj_set_flex_flow(tabCfg, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_style_pad_all(tabCfg, 8, 0);
-  lv_obj_set_style_pad_row(tabCfg, 8, 0);
-
-  lv_obj_t *cInfo = makeCard(tabCfg);
-  lv_obj_set_width(cInfo, lv_pct(100));
-  lv_obj_set_height(cInfo, LV_SIZE_CONTENT);
-  lblCfgInfo = mkLabel(cInfo, &lv_font_montserrat_14, 0xd0d8e8);
-  lv_label_set_long_mode(lblCfgInfo, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(lblCfgInfo, lv_pct(100));
-
-  lv_obj_t *cReb = makeCard(tabCfg);
-  lv_obj_set_width(cReb, lv_pct(100));
-  lv_obj_set_height(cReb, LV_SIZE_CONTENT);
-  lv_obj_t *btnReb = lv_btn_create(cReb);
-  lv_obj_set_size(btnReb, 140, 46);
-  lv_obj_add_event_cb(btnReb, cb_reboot, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *bl = lv_label_create(btnReb);
-  lv_label_set_text(bl, "Reiniciar");
-  lv_obj_center(bl);
-
-  // ---------- Barra de navegação ----------
-  navRow = lv_obj_create(scr);
-  lv_obj_set_size(navRow, scrW, 60);
-  lv_obj_set_style_bg_color(navRow, lv_color_hex(0x10101a), 0);
-  lv_obj_set_style_border_width(navRow, 0, 0);
-  lv_obj_clear_flag(navRow, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_style_pad_all(navRow, 6, 0);
-  lv_obj_set_style_pad_column(navRow, 4, 0);
-  lv_obj_set_flex_flow(navRow, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(navRow, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-  auto mkNav = [&](const char *txt, lv_event_cb_t cb) {
-    lv_obj_t *b = lv_btn_create(navRow);
-    lv_obj_set_size(b, (scrW - 26) / 3, 46);
-    lv_obj_set_style_bg_color(b, lv_color_hex(0x1a1a26), 0);
-    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
-    lv_obj_t *l = lv_label_create(b);
-    lv_label_set_text(l, txt);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
-    lv_obj_center(l);
-    return b;
-  };
-  lv_obj_move_foreground(navRow);
-  btnHome = mkNav("Clima", cb_nav_home);
-  btnSens = mkNav("Sensores", cb_nav_sens);
-  btnCfg = mkNav("Config", cb_nav_cfg);
-  lv_obj_set_style_bg_color(btnHome, lv_color_hex(0x2456c4), 0);
+  lv_obj_align(lblStNet, LV_ALIGN_LEFT_MID, 10, 0);
+  lv_obj_align(lblStWx, LV_ALIGN_TOP_RIGHT, -10, 4);
+  lv_obj_align(lblStBmp, LV_ALIGN_BOTTOM_RIGHT, -10, -4);
 }
 
-static void layoutUi() {
-  bool h = scrW > scrH;
-  uint32_t cw = scrW - 12, ch;
-  if (!h) { // retrato 280x412 util
-    auto place = [&](lv_obj_t *c, int y, int hh) { lv_obj_set_pos(c, 6, y); lv_obj_set_size(c, cw, hh); };
-    int y = 6;
-    place(cClock, y, 84); y += 84 + 6;      // relógio
-    place(cS, y, 128); y += 128 + 6;        // SENSORES (principal) 2x2 grande
-    place(cWx, y, 78); y += 78 + 6;         // previsao compacta
-    place(cRain, y, 44); y += 44 + 6;       // alerta chuva
-    place(cSt, y, (int)scrH - 60 - 6 - y); // status
-    lv_obj_align(lblClock, LV_ALIGN_TOP_MID, 0, 4);
-    lv_obj_align(lblDate, LV_ALIGN_BOTTOM_MID, 0, -2);
-    lv_obj_align(imgWx, LV_ALIGN_LEFT_MID, 4, 0);
-    lv_obj_align(lblWxTemp, LV_ALIGN_TOP_RIGHT, -8, 6);
-    lv_obj_align(lblWxDesc, LV_ALIGN_BOTTOM_RIGHT, -8, -26);
-    lv_obj_align(lblWxMini, LV_ALIGN_BOTTOM_RIGHT, -8, -4);
-    lv_obj_align(lblRainAlert, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_width(lblRainAlert, cw - 16);
-    lv_obj_align(lblBmpT, LV_ALIGN_TOP_LEFT, 10, 4);
-    lv_obj_align(lblBmpP, LV_ALIGN_TOP_RIGHT, -10, 4);
-    lv_obj_align(lblAlt, LV_ALIGN_BOTTOM_LEFT, 10, -4);
-    lv_obj_align(lblHum, LV_ALIGN_BOTTOM_RIGHT, -10, -4);
-    lv_obj_align(lblWxOut, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_align(lblStBmp, LV_ALIGN_TOP_LEFT, 6, 4);
-    lv_obj_align(lblStQmi, LV_ALIGN_TOP_RIGHT, -6, 4);
-    lv_obj_align(lblStWx, LV_ALIGN_BOTTOM_LEFT, 6, -4);
-    lv_obj_align(lblStNet, LV_ALIGN_BOTTOM_RIGHT, -6, -4);
-  } else { // paisagem 456x(216-44)
-    ch = (scrH - 60 - 6 * 2 - 6) / 2;
-    lv_obj_set_size(tabHome, scrW, scrH - 60);
-    lv_obj_set_pos(cClock, 6, 6);   lv_obj_set_size(cClock, cw / 4 - 3, ch);
-    lv_obj_set_pos(cWx, 6 + cw / 4 + 3, 6); lv_obj_set_size(cWx, cw / 4 - 3, ch);
-    lv_obj_set_pos(cRain, 6 + 2 * (cw / 4 + 3), 6); lv_obj_set_size(cRain, cw / 2 - 9, ch);
-    lv_obj_set_pos(cS, 6, 6 + ch + 6); lv_obj_set_size(cS, cw / 2 - 3, ch);
-    lv_obj_set_pos(cSt, 6 + cw / 2 + 3, 6 + ch + 6); lv_obj_set_size(cSt, cw / 2 - 9, ch);
-    lv_obj_align(lblClock, LV_ALIGN_CENTER, 0, -14);
-    lv_obj_align(lblDate, LV_ALIGN_CENTER, 0, 28);
-    lv_obj_align(imgWx, LV_ALIGN_LEFT_MID, 2, 0);
-    lv_obj_align(lblWxTemp, LV_ALIGN_TOP_MID, 10, 2);
-    lv_obj_align(lblWxDesc, LV_ALIGN_BOTTOM_MID, 10, -20);
-    lv_obj_align(lblWxMini, LV_ALIGN_BOTTOM_MID, 10, 0);
-    lv_obj_align(lblRainAlert, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_width(lblRainAlert, cw / 2 - 20);
-    lv_obj_align(lblBmpT, LV_ALIGN_TOP_LEFT, 4, 2);
-    lv_obj_align(lblBmpP, LV_ALIGN_TOP_LEFT, 4, 26);
-    lv_obj_align(lblWxOut, LV_ALIGN_BOTTOM_LEFT, 4, 0);
-    lv_obj_align(lblStBmp, LV_ALIGN_TOP_LEFT, 2, 0);
-    lv_obj_align(lblStQmi, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_align(lblStWx, LV_ALIGN_TOP_RIGHT, -2, 0);
-    lv_obj_align(lblStNet, LV_ALIGN_BOTTOM_MID, 0, 0);
-  }
-  // sensores / config seguem a orientação
-  lv_obj_set_size(tabSensors, scrW, scrH - 60);
-  lv_obj_set_size(tabCfg, scrW, scrH - 60);
-}
 
 static void applyRotation(int rot) {
   // NUNCA chamar gfx->setRotation() em runtime: o CO5300 nao suporta
@@ -744,10 +576,19 @@ void debugLog() {
 
 void startAP() {
   st.apMode = true;
-  WiFi.mode(WIFI_AP);
+  WiFi.mode(WIFI_AP_STA); // APSTA: tenta voltar pra rede salva em background
   WiFi.softAP("EstacaoMeteo", "12345678");
   dns.start(53, "*", WiFi.softAPIP());
   Serial.printf("[AP] SSID EstacaoMeteo IP %s\n", WiFi.softAPIP().toString().c_str());
+}
+
+void apExit() {
+  dns.stop();
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_STA);
+  st.apMode = false;
+  if (MDNS.begin("estacao")) MDNS.addService("http", "tcp", 80);
+  Serial.printf("[WiFi] reconectado — saiu do AP, IP %s\n", WiFi.localIP().toString().c_str());
 }
 
 void netStart() {
@@ -792,23 +633,9 @@ static void uiTick() {
     snprintf(b, sizeof(b), "min %.0f  max %.0f%s", st.tmin, st.tmax, trend);
     lv_label_set_text(lblWxMini, b);
     lv_image_set_src(imgWx, wcodeIcon(st.wcode));
-    // alerta de chuva
-    if (st.rainInH >= 0) {
-      lv_obj_clear_flag(cRain, LV_OBJ_FLAG_HIDDEN);
-      if (st.rainInH == 0)
-        snprintf(b, sizeof(b), "CHOVENDO AGORA (%.1f mm) — leva guarda-chuva!", st.rainMm);
-      else if (st.rainInH == 1)
-        snprintf(b, sizeof(b), "Chuva na proxima hora (%d%%, %.1f mm) — leva guarda-chuva!", st.rainProb, st.rainMm);
-      else
-        snprintf(b, sizeof(b), "Chuva em %dh (%d%%, %.1f mm) — leva guarda-chuva!", st.rainInH, st.rainProb, st.rainMm);
-      lv_label_set_text(lblRainAlert, b);
-    } else {
-      lv_obj_add_flag(cRain, LV_OBJ_FLAG_HIDDEN);
-    }
   } else {
     lv_label_set_text(lblWxTemp, "--");
     lv_label_set_text(lblWxDesc, WiFi.status() == WL_CONNECTED ? "carregando..." : "sem rede");
-    lv_obj_add_flag(cRain, LV_OBJ_FLAG_HIDDEN);
   }
 
   if (st.bmp == ST_OK) {
@@ -832,35 +659,20 @@ static void uiTick() {
   snprintf(b, sizeof(b), "Fora: %.1f C  %.0f%%", st.outdoorTemp, st.humidity < 0 ? 0 : st.humidity);
   lv_label_set_text(lblWxOut, b);
 
-  snprintf(b, sizeof(b), "BMP581 %s", st.bmp == ST_OK ? "OK" : (st.bmp == ST_FAIL ? "FALHA" : "..."));
+  snprintf(b, sizeof(b), "BMP %s | QMI %s",
+           st.bmp == ST_OK ? "OK" : (st.bmp == ST_FAIL ? "x" : ".."),
+           st.qmi == ST_OK ? "OK" : "x");
   lv_label_set_text(lblStBmp, b);
-  snprintf(b, sizeof(b), "QMI8658 %s", st.qmi == ST_OK ? "OK" : "FALHA");
-  lv_label_set_text(lblStQmi, b);
-  snprintf(b, sizeof(b), "Previsao %s", st.wxValid ? "OK" : "--");
+  snprintf(b, sizeof(b), "%s | Previsao %s",
+           st.apMode ? "AP EstacaoMeteo" : (strlen(cfg.ssid) ? cfg.ssid : "WiFi"),
+           st.wxValid ? "OK" : "--");
   lv_label_set_text(lblStWx, b);
-  if (st.apMode) snprintf(b, sizeof(b), "AP 192.168.4.1");
+  if (st.apMode) snprintf(b, sizeof(b), "AP  192.168.4.1");
   else {
     String ip = ipStr();
-    snprintf(b, sizeof(b), "IP %s", ip.c_str());
+    snprintf(b, sizeof(b), "IP  %s", ip.c_str());
   }
   lv_label_set_text(lblStNet, b);
-
-  snprintf(b, sizeof(b),
-           "WiFi: %s\nIP: %s\nLocal: %s\nFuso: %s\n\nPara editar WiFi/local/fuso,\nacesse http://%s/\nno navegador do celular ou PC.",
-           st.apMode ? "AP (EstacaoMeteo)" : cfg.ssid,
-           ipStr().c_str(),
-           strlen(cfg.city) ? cfg.city : "manual",
-           cfg.tz, ipStr().c_str());
-  lv_label_set_text(lblCfgInfo, b);
-
-  if (st.qmi == ST_OK) {
-    snprintf(b, sizeof(b), "Giro: %+.0f %+.0f %+.0f dps", st.gyro[0], st.gyro[1], st.gyro[2]);
-    lv_label_set_text(lblGyro, b);
-    snprintf(b, sizeof(b), "Acc: %+.2f %+.2f %+.2f g", st.acc[0], st.acc[1], st.acc[2]);
-    lv_label_set_text(lblAcc, b);
-    snprintf(b, sizeof(b), "Rotacao: %d (%s)", st.rot, scrW > scrH ? "paisagem" : "retrato");
-    lv_label_set_text(lblRot, b);
-  }
 }
 
 // ============================ setup / loop ===================================
@@ -893,27 +705,15 @@ void setup() {
     uint32_t h = lv_display_get_vertical_resolution(disp);
     if (w && h) { scrW = w; scrH = h; }
   }
-  Serial.printf("[LVGL] logico %ux%u (paisagem)
-", scrW, scrH);
+  Serial.printf("[LVGL] logico %ux%u (paisagem)\n", scrW, scrH);
   bufPx = scrW * 30;
   dbuf = (lv_color_t *)heap_caps_aligned_alloc(4, bufPx * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   lv_display_set_flush_cb(disp, disp_flush);
   lv_display_set_buffers(disp, dbuf, NULL, bufPx * 2, LV_DISPLAY_RENDER_MODE_PARTIAL);
   lv_display_add_event_cb(disp, disp_rounder, LV_EVENT_INVALIDATE_AREA, NULL);
 
-  { // diagnostico FT3168
-    Wire.beginTransmission(FT_ADDR);
-    uint8_t pr = Wire.endTransmission();
-    Serial.printf("[FT] probe 0x38: %s\n", pr == 0 ? "presente" : "AUSENTE");
-    Wire.beginTransmission(FT_ADDR); Wire.write((uint8_t)0xA8); Wire.endTransmission(false);
-    if (Wire.requestFrom(FT_ADDR, 1) == 1) Serial.printf("[FT] chip_id=0x%02X\n", Wire.read());
-  }
-  lv_indev_t *indev = lv_indev_create();
-  lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
-  lv_indev_set_read_cb(indev, touch_cb);
 
   uiInit();
-  layoutUi();
 
   // sensores
   st.bmp = bmp.begin(BMP_ADDR, &Wire) ? ST_OK : ST_FAIL;
@@ -998,12 +798,24 @@ void loop() {
 
   if (!st.apMode) {
     if (ms - tLastWx >= 30UL * 60 * 1000) { tLastWx = ms; fetchWeather(); geoLocate(); }
-    if (WiFi.status() != WL_CONNECTED && ms - bootMs > 60000) {
-      static uint32_t tReconn = 0;
-      if (ms - tReconn > 30000) { tReconn = ms; wifiMulti.run(); }
+    if (WiFi.status() != WL_CONNECTED) {
+      // caiu/sem rede: tenta 10 min, depois AP de configuracao
+      if (ms - bootMs > AP_FALLBACK_MS) startAP();
+      else {
+        static uint32_t tReconn = 0;
+        if (ms - tReconn > 30000) { tReconn = ms; wifiMulti.run(); }
+      }
     }
     if (time(nullptr) < 1600000000 || difftime(time(nullptr), lastNtpSync) > 3600) {
       lastNtpSync = time(nullptr);
+    }
+  } else {
+    // em AP: tenta rede salva a cada 60s; conectou = sai do AP
+    static uint32_t tApTry = 0;
+    if (ms - tApTry >= 60000UL) {
+      tApTry = ms;
+      wifiMulti.run();
+      if (WiFi.status() == WL_CONNECTED) apExit();
     }
   }
 
