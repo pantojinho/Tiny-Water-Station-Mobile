@@ -1,0 +1,42 @@
+CASE V3 — HORIZONTAL (paisagem) COM USB LATERAL
+================================================
+Substitui a v2. Mudanças:
+  1. Tela em PAISAGEM: layout interno girado 90°. Janela do vidro
+     41,97 x 27,09 mm. BMP581 ficou ACIMA da tela (spacers na tampa
+     girados junto). Divisória de calor agora é horizontal.
+  2. USB: o talho grande de 22 x 18 mm do canto foi ELIMINADO. Novo
+     furo-porta de 14,5 x 9,65 mm (boca em arco) na parede lateral,
+     alinhado com o conector USB-C da placa (plug shell 12,35 x 7,35,
+     folga >= 0,5 mm por lado). O cabo entra reto pela lateral.
+  3. Fechamento agora com M3 x 16 (4x, DIN912 — kit dos parafusos
+     pretos): tampa com furo passante 3,4 + bolsa de cabeça 6,0 x 1,6;
+     corpo com postes Ø7 e piloto Ø2,8 (rosca no PLA).
+     As placas continuam M2: 4x M2 x 20 (Waveshare, rosca metálica da
+     placa) e 2x M2 x 6 (BMP581).
+  4. FIRMWARE: precisa do commit "paisagem" (LVGL ROTATION_270,
+     display lógico 456x280). Sem ele a UI continua em retrato.
+
+Arquivos:
+  case/v3-horizontal/caixa_integrada_corpo-3.stl
+  case/v3-horizontal/caixa_integrada_tampa-3.stl
+  case/v3-horizontal/gerar_case_v3.py   (fonte paramétrica trimesh)
+  case/v3-horizontal/visual_*.png       (renders de conferência)
+
+Impressão (Ender-3 V3 KE, PLA, 0.4):
+  - Corpo com a face da janela no PC (abertura pra cima), sem suporte.
+  - Tampa com os spacers pra cima, sem suporte.
+  - Camada 0,20; 3 paredes; 20%. STL em mm, escala 100%.
+
+Montagem: igual v2 — BMP581 primeiro (M2x6 nos spacers curtos, lado dos
+componentes pros respiros), Waveshare depois (M2x20, vidro pra janela,
+aperte sem comprimir), fios por trás da divisória, fecha com 4x M3x16.
+USB: passe o cabo pela lateral ANTES de fechar a tampa.
+
+Dimensões: mecânica oficial Waveshare (PCB 43,5 x 38,5; vidro 44,0 x
+29,12 paisagem; furos M2 a 22,86 x 38,50; conector USB-C centrado na
+borda-longa a 22 mm do canto) + Adafruit BMP581 (25,4 x 17,78).
+
+Verificado: malhas watertight, bezel >= 0,8 mm por lado, spacers
+dentro das placas, postes sem colisão, furo USB alinhado ao conector
+(raio-testado na malha). Ainda não testado fisicamente na impressora —
+imprima o corpo primeiro e confira janela + USB.

@@ -883,10 +883,20 @@ void setup() {
 
   lv_init();
   lv_tick_set_cb(millis_cb);
+  // Case v3 (horizontal): display logico em PAISAGEM 456x280 via rotacao LVGL.
+  // Painel fisico segue rot nativo 0 (CO5300 nao reprograma MADCTL em runtime).
+  // 270 = girar 90° horario do retrato + compensar os 180° da montagem da placa.
+  disp = lv_display_create(scrW, scrH);
+  lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_270);
+  {
+    uint32_t w = lv_display_get_horizontal_resolution(disp);
+    uint32_t h = lv_display_get_vertical_resolution(disp);
+    if (w && h) { scrW = w; scrH = h; }
+  }
+  Serial.printf("[LVGL] logico %ux%u (paisagem)
+", scrW, scrH);
   bufPx = scrW * 30;
   dbuf = (lv_color_t *)heap_caps_aligned_alloc(4, bufPx * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  disp = lv_display_create(scrW, scrH);
-  lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_180); // placa montada 180° — software, seguro
   lv_display_set_flush_cb(disp, disp_flush);
   lv_display_set_buffers(disp, dbuf, NULL, bufPx * 2, LV_DISPLAY_RENDER_MODE_PARTIAL);
   lv_display_add_event_cb(disp, disp_rounder, LV_EVENT_INVALIDATE_AREA, NULL);
