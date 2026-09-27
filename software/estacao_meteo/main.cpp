@@ -1,3 +1,4 @@
+#include <Arduino.h>
 /*
  * Estação Meteorológica Mini
  * Waveshare ESP32-S3-Touch-AMOLED-1.64 (CO5300 QSPI 280x456 + FT3168 touch + QMI8658 IMU)
