@@ -1,8 +1,8 @@
-/* lv_conf.h minimo — LVGL 9.6 (opcoes nao listadas usam defaults internos) */
+/* lv_conf.h minimo — LVGL 9.x (opcoes nao listadas usam defaults internos) */
 #ifndef LV_CONF_H
 #define LV_CONF_H
 
-/* Cor: RGB565 (o swap de bytes e feito no flush com lv_draw_sw_rgb565_swap) */
+/* Cor: RGB565 na ordem usada pelo Arduino_GFX no firmware principal. */
 #define LV_COLOR_DEPTH 16
 
 /* Pool de memoria do LVGL (heap interno do ESP32-S3) */
